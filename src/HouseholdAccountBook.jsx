@@ -22,6 +22,10 @@ const HouseholdAccountBook = () => {
     income: ['월급여', '프리렌스수입', '투자', '선물', '기타']
   };
 
+  const formatCurrency = (amount) => {
+      return amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  };
+
   const resetForm = () => {
     setFormData({
       type: 'expense',
@@ -80,6 +84,7 @@ const HouseholdAccountBook = () => {
   const totalExpenses = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
   const balance = totalIncome - totalExpenses;
 
+
   return (
     <div className="account-book-container">
       <div className="account-book-wrapper">
@@ -95,7 +100,7 @@ const HouseholdAccountBook = () => {
             <div className="summary-card-content">
               <div>
                 <p className="summary-card-text">총 수입</p>
-                <p className="summary-card-amount">₩{totalIncome.toFixed(2)}</p>
+                <p className="summary-card-amount">₩{formatCurrency(totalIncome)}</p>
               </div>
               <TrendingUp className="summary-card-icon" />
             </div>
@@ -105,7 +110,7 @@ const HouseholdAccountBook = () => {
             <div className="summary-card-content">
               <div>
                 <p className="summary-card-text">총 지출</p>
-                <p className="summary-card-amount">₩{totalExpenses.toFixed(2)}</p>
+                <p className="summary-card-amount">₩{formatCurrency(totalExpenses)}</p>
               </div>
               <TrendingDown className="summary-card-icon" />
             </div>
@@ -115,7 +120,7 @@ const HouseholdAccountBook = () => {
             <div className="summary-card-content">
               <div>
                 <p className="summary-card-text">잔액</p>
-                <p className="summary-card-amount">₩{balance.toFixed(2)}</p>
+                <p className="summary-card-amount">₩{formatCurrency(balance)}</p>
               </div>
               <Wallet className="summary-card-icon" />
             </div>
@@ -279,7 +284,7 @@ const HouseholdAccountBook = () => {
                   </div>
                   <div className="transaction-right">
                     <span className={`transaction-amount ${transaction.type}`}>
-                      {transaction.type === 'income' ? '+' : '-'}${transaction.amount.toFixed(2)}
+                      {transaction.type === 'income' ? '+' : '-'}₩{formatCurrency(transaction.amount)}
                     </span>
                     <div className="transaction-actions">
                       <button
