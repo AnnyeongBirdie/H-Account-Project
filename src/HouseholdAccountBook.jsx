@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit3, TrendingUp, TrendingDown, DollarSign, Wallet, Calendar, Filter } from 'lucide-react';
+import { Plus, Trash2, Edit3, TrendingUp, TrendingDown, Wallet } from 'lucide-react';
 import './HouseholdAccountBook.css';
+import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from './api';
 
 const HouseholdAccountBook = () => {
   const [transactions, setTransactions] = useState([]);
@@ -8,7 +9,9 @@ const HouseholdAccountBook = () => {
   const [editingId, setEditingId] = useState(null);
   const [filter, setFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
-  
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
   const [formData, setFormData] = useState({
     type: 'expense',
     category: '',
@@ -23,7 +26,7 @@ const HouseholdAccountBook = () => {
   };
 
   const formatCurrency = (amount) => {
-      return amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return Number(amount).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   };
 
   const resetForm = () => {
@@ -36,27 +39,52 @@ const HouseholdAccountBook = () => {
     });
   };
 
-  const handleSubmit = () => {
+  // -------- Load initial data from backend --------
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      setError('');
+      try {
+        const data = await getTransactions();
+        setTransactions(data);
+      } catch (e) {
+        setError(e.message || 'Failed to load transactions');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  // -------- Create or Update --------
+  const handleSubmit = async () => {
     if (!formData.amount || !formData.category || !formData.description) return;
 
-    const newTransaction = {
-      id: editingId || Date.now(),
+    const payload = {
       ...formData,
       amount: parseFloat(formData.amount),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(), // server expects TIMESTAMPTZ
     };
 
-    if (editingId) {
-      setTransactions(prev => prev.map(t => t.id === editingId ? newTransaction : t));
-      setEditingId(null);
-    } else {
-      setTransactions(prev => [...prev, newTransaction]);
+    setError('');
+    try {
+      if (editingId) {
+        const updated = await updateTransaction(editingId, payload);
+        setTransactions(prev => prev.map(t => t.id === editingId ? updated : t));
+        setEditingId(null);
+      } else {
+        const created = await createTransaction(payload);
+        // Put newest at top for snappy UX; render also sorts by timestamp
+        setTransactions(prev => [created, ...prev]);
+      }
+      resetForm();
+      setIsAddingTransaction(false);
+    } catch (e) {
+      setError(e.message || 'Save failed');
     }
-
-    resetForm();
-    setIsAddingTransaction(false);
   };
 
+  // -------- Edit --------
   const handleEdit = (transaction) => {
     setFormData({
       type: transaction.type,
@@ -69,21 +97,28 @@ const HouseholdAccountBook = () => {
     setIsAddingTransaction(true);
   };
 
-  const handleDelete = (id) => {
-    setTransactions(prev => prev.filter(t => t.id !== id));
+  // -------- Delete --------
+  const handleDeleteClick = async (id) => {
+    setError('');
+    try {
+      await deleteTransaction(id);
+      setTransactions(prev => prev.filter(t => t.id !== id));
+    } catch (e) {
+      setError(e.message || 'Delete failed');
+    }
   };
 
   const filteredTransactions = transactions.filter(transaction => {
     const matchesFilter = filter === 'all' || transaction.type === filter;
-    const matchesSearch = transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         transaction.category.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch =
+      transaction.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      transaction.category.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesFilter && matchesSearch;
   });
 
-  const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-  const totalExpenses = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
+  const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount), 0);
+  const totalExpenses = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount), 0);
   const balance = totalIncome - totalExpenses;
-
 
   return (
     <div className="account-book-container">
@@ -105,7 +140,7 @@ const HouseholdAccountBook = () => {
               <TrendingUp className="summary-card-icon" />
             </div>
           </div>
-          
+
           <div className="summary-card expense">
             <div className="summary-card-content">
               <div>
@@ -115,7 +150,7 @@ const HouseholdAccountBook = () => {
               <TrendingDown className="summary-card-icon" />
             </div>
           </div>
-          
+
           <div className={`summary-card balance ${balance < 0 ? 'negative' : ''}`}>
             <div className="summary-card-content">
               <div>
@@ -139,7 +174,7 @@ const HouseholdAccountBook = () => {
                 거래 내역 추가
               </button>
             </div>
-            
+
             <div className="controls-right">
               <input
                 type="text"
@@ -148,7 +183,7 @@ const HouseholdAccountBook = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="search-input"
               />
-              
+
               <select
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
@@ -168,12 +203,13 @@ const HouseholdAccountBook = () => {
             <h2 className="form-title">
               {editingId ? 'Edit Transaction' : '새로운 거래 내역 추가'}
             </h2>
+            {error && <p style={{ color: '#dc2626', marginBottom: '0.75rem' }}>{error}</p>}
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label">종류</label>
                 <select
                   value={formData.type}
-                  onChange={(e) => setFormData({...formData, type: e.target.value, category: ''})}
+                  onChange={(e) => setFormData({ ...formData, type: e.target.value, category: '' })}
                   className="form-input"
                 >
                   <option value="expense">지출</option>
@@ -185,7 +221,7 @@ const HouseholdAccountBook = () => {
                 <label className="form-label">카테고리</label>
                 <select
                   value={formData.category}
-                  onChange={(e) => setFormData({...formData, category: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="form-input"
                   required
                 >
@@ -203,7 +239,7 @@ const HouseholdAccountBook = () => {
                   step="0.01"
                   min="0"
                   value={formData.amount}
-                  onChange={(e) => setFormData({...formData, amount: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
                   className="form-input"
                   placeholder="0.00"
                   required
@@ -215,7 +251,7 @@ const HouseholdAccountBook = () => {
                 <input
                   type="date"
                   value={formData.date}
-                  onChange={(e) => setFormData({...formData, date: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                   className="form-input"
                   required
                 />
@@ -226,7 +262,7 @@ const HouseholdAccountBook = () => {
                 <input
                   type="text"
                   value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   className="form-input"
                   placeholder="거래 내역 메모"
                   required
@@ -260,8 +296,10 @@ const HouseholdAccountBook = () => {
         {/* Transactions List */}
         <div className="transactions-card">
           <h2 className="transactions-title">최근 거래 내역</h2>
-          
-          {filteredTransactions.length === 0 ? (
+
+          {loading ? (
+            <p>불러오는 중...</p>
+          ) : filteredTransactions.length === 0 ? (
             <div className="transactions-empty">
               <Wallet className="transactions-empty-icon" />
               <p className="transactions-empty-text">기록을 찾지 못했습니다</p>
@@ -272,37 +310,37 @@ const HouseholdAccountBook = () => {
               {filteredTransactions
                 .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
                 .map(transaction => (
-                <div key={transaction.id} className="transaction-item">
-                  <div className="transaction-left">
-                    <div className="transaction-content">
-                      <div className={`transaction-indicator ${transaction.type}`}></div>
-                      <div>
-                        <p className="transaction-description">{transaction.description}</p>
-                        <p className="transaction-meta">{transaction.category} • {transaction.date}</p>
+                  <div key={transaction.id} className="transaction-item">
+                    <div className="transaction-left">
+                      <div className="transaction-content">
+                        <div className={`transaction-indicator ${transaction.type}`}></div>
+                        <div>
+                          <p className="transaction-description">{transaction.description}</p>
+                          <p className="transaction-meta">{transaction.category} • {transaction.date}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="transaction-right">
+                      <span className={`transaction-amount ${transaction.type}`}>
+                        {transaction.type === 'income' ? '+' : '-'}₩{formatCurrency(transaction.amount)}
+                      </span>
+                      <div className="transaction-actions">
+                        <button
+                          onClick={() => handleEdit(transaction)}
+                          className="transaction-action-btn edit"
+                        >
+                          <Edit3 className="transaction-action-icon" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteClick(transaction.id)}
+                          className="transaction-action-btn delete"
+                        >
+                          <Trash2 className="transaction-action-icon" />
+                        </button>
                       </div>
                     </div>
                   </div>
-                  <div className="transaction-right">
-                    <span className={`transaction-amount ${transaction.type}`}>
-                      {transaction.type === 'income' ? '+' : '-'}₩{formatCurrency(transaction.amount)}
-                    </span>
-                    <div className="transaction-actions">
-                      <button
-                        onClick={() => handleEdit(transaction)}
-                        className="transaction-action-btn edit"
-                      >
-                        <Edit3 className="transaction-action-icon" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(transaction.id)}
-                        className="transaction-action-btn delete"
-                      >
-                        <Trash2 className="transaction-action-icon" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </div>
